@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+
+# Runtime output (created by running the tool, not part of the source)
+logs/
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+.venv/
+venv/

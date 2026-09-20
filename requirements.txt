@@ -1,0 +1,6 @@
+# File Organizer uses only the Python 3.11+ standard library.
+# No third-party packages are required to run it.
+#
+# PyInstaller is only needed if you want to build a standalone .exe
+# (see README.md -> "Building the .exe"). Install it separately:
+#   pip install pyinstaller

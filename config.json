@@ -1,0 +1,16 @@
+{
+    "Images": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".heic", ".heif"],
+    "Excel": [".xls", ".xlsx", ".xlsm", ".xlsb", ".csv"],
+    "Word": [".doc", ".docx", ".docm"],
+    "PDF": [".pdf"],
+    "PowerPoint": [".ppt", ".pptx", ".pptm"],
+    "Videos": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".3gp", ".mpg", ".mpeg"],
+    "Audio": [".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"],
+    "Archives": [".zip", ".rar", ".7z", ".tar", ".gz"],
+    "Text": [".txt", ".log", ".md"],
+    "Executables": {
+        "extensions": [".exe", ".msi"],
+        "date_folders": false
+    },
+    "Other": []
+}
