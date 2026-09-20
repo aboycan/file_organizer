@@ -504,3 +504,5 @@ On any platform, the built executable first looks for a `config.json`
 **next to itself**; if found, it's used as-is (no rebuild needed to tweak
 categories). Otherwise it falls back to the copy bundled inside the
 executable at build time.
+t e s t  
+ 
