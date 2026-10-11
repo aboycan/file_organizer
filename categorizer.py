@@ -1,4 +1,14 @@
-"""Extension -> category classification, driven by config.json."""
+"""Extension -> category classification, driven by config.json.
+
+Loads config.json (a plain list of extensions per category, or an object
+with "extensions" and "date_folders": false), maps every file extension
+case-insensitively to its category, and puts anything unlisted in
+"Other". Also tells the organizer which categories are exempt from
+--date-folders (Executables, by default).
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
+"""
 
 from __future__ import annotations
 
@@ -36,7 +46,7 @@ class Categorizer:
         must never be split into Year/MonYear subfolders even when
         --date-folders is passed — e.g. Executables, where an installed
         app's own files getting sorted into different date folders by their
-        individual modified times would scatter the app's own dependencies
+        individual creation dates would scatter the app's own dependencies
         relative to each other and break it.
         """
         try:

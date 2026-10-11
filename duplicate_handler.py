@@ -1,4 +1,14 @@
-"""Resolves what to do when a destination path already exists."""
+"""Resolves what to do when a destination path already exists.
+
+Implements the --duplicate policies: skip, rename (photo.jpg ->
+photo_1.jpg, photo_2.jpg, ...) and overwrite, plus the optional
+--hash-check that silently skips byte-for-byte identical files. Paths
+claimed earlier in the same run are tracked, so two source files never
+collide even before either one is written.
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
+"""
 
 from __future__ import annotations
 

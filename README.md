@@ -1,5 +1,7 @@
 # File Organizer
 
+**Author:** Madhu Kumar ([madhu.a@hotmail.com](mailto:madhu.a@hotmail.com))
+
 A safe, dependency-free command-line utility, for Windows, macOS, and Linux,
 that recursively scans a drive/volume or folder — no matter how deeply
 nested — and organizes every accessible file into category folders (Images,
@@ -98,7 +100,7 @@ correctly on its own.
 | `--move` | Move files instead of copying them. |
 | `--dry-run` | Scan and report what *would* happen; makes zero filesystem changes. |
 | `--preserve-structure` | Keep the original folder hierarchy beneath each category folder. Default is to flatten everything directly into the category folder. |
-| `--date-folders` | Add `Year\MonYear` subfolders (by file last-modified date) beneath each category folder, e.g. `Images\2025\Jan2025\photo.jpg`. Combines with `--preserve-structure` (date folders come first). |
+| `--date-folders` | Add `Year\MonYear` subfolders (by file creation date) beneath each category folder, e.g. `Images\2025\Jan2025\photo.jpg`. Combines with `--preserve-structure` (date folders come first). |
 | `--ignore-hidden` | Skip files with the Windows "hidden" attribute (and dotfiles). |
 | `--ignore-system` | Skip files with the Windows "system" attribute. |
 | `--duplicate {skip,rename,overwrite}` | How to handle a destination file that already exists. Default: `rename`. |
@@ -187,7 +189,7 @@ D:\Work\Reports\2026\Final\report.xlsx  ->  D:\Organized\Excel\Work\Reports\2026
 ## Date folders
 
 `--date-folders` adds `Year\MonYear` subfolders beneath each category
-folder, based on the file's last-modified date:
+folder, based on the date each file was **originally created**:
 
 ```text
 D:\Personal\Photos\vacation.jpg  ->  D:\Organized\Images\2025\Jan2025\vacation.jpg
@@ -205,20 +207,44 @@ D:\Personal\Photos\2024\vacation.jpg  ->  D:\Organized\Images\2025\Jan2025\Perso
 ```
 
 Notes:
-- The date used is the file's **last-modified date** (`st_mtime`), not
-  "date taken" from photo EXIF data — this works uniformly for every file
-  type without needing extra libraries, and unlike creation date it
-  survives being copied between drives (the modified timestamp travels
-  with the file; creation date typically resets to "now" on copy). For
-  photos edited after the fact, this reflects the edit date rather than
-  when the photo was originally taken.
-- A file with unreadable/corrupt date metadata falls back to an
-  `UnknownDate\UnknownDate` folder instead of failing.
+- The date is worked out per file, in this order:
+  1. **Photos** — the camera's "Date taken" stored inside the file (EXIF
+     `DateTimeOriginal`, else `DateTimeDigitized`). Read from JPEG/MPO,
+     TIFF and TIFF-based RAW (DNG, NEF, CR2, ARW, ORF, RW2, ...), PNG,
+     WebP and HEIC/HEIF/AVIF.
+  2. **Videos** (MP4, MOV, 3GP, M4V, M4A, ...) — the recording date stored
+     in the file's movie header.
+  3. **A date in the file name**, as phones and apps write it when they
+     create the file — e.g. `Screenshot_2016-03-02-12-30-58.png`,
+     `IMG-20151231-WA0001.jpg` (WhatsApp), `VID_20160101_123456.mp4`,
+     `20160830_200615.jpg`. Only a full year-month-day (year first) that
+     stands on its own in the name counts, so random digits, hashes or
+     folder names are never mistaken for a date.
+  4. **Everything else** — the **earlier** of the file's created and
+     last-modified dates.
+- Why not just the "Created" date shown in Windows Explorer? Windows sets
+  it to the moment a file lands on a drive, so files copied from a phone,
+  camera card, backup or another disk all show the day they were copied
+  (and copies this tool makes get a new one too). The date stored inside a
+  photo/video travels with the file, and the modified date survives
+  copying, so steps 1–4 recover the real date instead.
+- File contents are checked, not the extension, so a mis-named file is
+  still read correctly. Reading is header-only and never modifies files;
+  an unreadable or corrupt file just falls through to the next step. Dates
+  before 1980 or in the future (e.g. an unset camera clock) are ignored.
+- The final summary shows how many dates came from each source
+  (`Dates taken from : ...`), and the log file records the date and source
+  used for every file. Run with `--dry-run` first to preview where your
+  files will land.
+- Where the OS doesn't expose a creation date (Linux), step 4 uses the
+  last-modified date.
+- A file whose date can't be turned into a valid calendar date falls back
+  to an `UnknownDate\UnknownDate` folder instead of failing.
 - **`Executables` is exempt from `--date-folders` by default.** An app's
-  own files (e.g. `app.exe` and a `bin\helper.exe` it depends on) are often
-  modified on very different dates, so date-sorting them independently
-  would scatter them into different Year/MonYear folders *relative to each
-  other* — breaking the app even with `--preserve-structure` keeping their
+  own files (e.g. `app.exe` and a `bin\helper.exe` it depends on) often
+  have very different dates (for example after an update), so date-sorting
+  them independently would scatter them into different Year/MonYear
+  folders *relative to each other* — breaking the app even with `--preserve-structure` keeping their
   relative paths intact. Executables always land at
   `Executables\<preserved-path>\...` with no date split, regardless of
   `--date-folders`. This is controlled per-category in `config.json` via a
@@ -456,6 +482,7 @@ file_organizer/
 ├── categorizer.py         # Extension -> category classification
 ├── organizer.py           # Orchestrates scan -> filter -> confirm -> copy/move
 ├── duplicate_handler.py   # skip / rename / overwrite resolution
+├── file_dates.py          # Original-date detection for --date-folders (EXIF, video, file dates)
 ├── logger.py               # Logging setup
 ├── utils.py                 # Size parsing, hashing, path helpers
 ├── config.json              # Extension -> category mapping
@@ -504,3 +531,7 @@ On any platform, the built executable first looks for a `config.json`
 **next to itself**; if found, it's used as-is (no rebuild needed to tweak
 categories). Otherwise it falls back to the copy bundled inside the
 executable at build time.
+
+## Author
+
+Created and maintained by **Madhu Kumar** ([madhu.a@hotmail.com](mailto:madhu.a@hotmail.com)).

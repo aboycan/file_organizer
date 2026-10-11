@@ -2,7 +2,14 @@
 """File Organizer - recursively scans a drive or folder and sorts files
 into category folders (Images, Excel, Word, PDF, Videos, ...) by extension.
 
+This is the command-line entry point: it defines the options with argparse
+and hands them to organizer.Organizer, which runs the
+scan -> filter -> confirm -> copy/move pipeline. Copy is the default, so
+the original files are never deleted or modified unless --move is given.
+
 Run with -h/--help for the full list of options and examples.
+
+Author: Madhu Kumar <madhu.a@hotmail.com>
 """
 
 from __future__ import annotations
@@ -122,8 +129,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--date-folders", action="store_true",
-        help="Add Year\\MonYear subfolders (by file last-modified date) beneath each "
-             "category folder, e.g. Images\\2025\\Jan2025\\photo.jpg. "
+        help="Add Year\\MonYear subfolders beneath each category folder, by the "
+             "date each file was originally created: a photo's 'date taken', a "
+             "video's recorded date, a date in the file name (e.g. "
+             "Screenshot_2016-03-02..., IMG-20151231-WA0001), otherwise the "
+             "earlier of the file's created/modified dates. "
+             "E.g. Images\\2025\\Jan2025\\photo.jpg. "
              "Combines with --preserve-structure (date folders come first). "
              "Categories marked date_folders:false in config.json (Executables, "
              "by default) are exempt, so an app's own files never get split "

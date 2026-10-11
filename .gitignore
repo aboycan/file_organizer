@@ -1,3 +1,7 @@
+# File Organizer - files Git should not track: Python bytecode, run logs,
+# PyInstaller build output, OS cruft and virtual environments.
+# Author: Madhu Kumar <madhu.a@hotmail.com>
+
 __pycache__/
 *.pyc
 

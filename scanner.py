@@ -3,6 +3,13 @@
 Uses an explicit stack with ``os.scandir`` (rather than plain recursion)
 so there is no practical limit on nesting depth and a single bad
 directory can never take down the whole scan.
+
+Yields one FileEntry per file (path, size, category, hidden/system flags,
+modified and creation times). The destination folder, --exclude-folders
+matches and symlinked/junction directories are never descended into.
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
 """
 
 from __future__ import annotations
@@ -13,7 +20,7 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional, Set
 
 from categorizer import Categorizer
-from utils import get_file_attributes, path_key, safe_stat
+from utils import creation_time, get_file_attributes, path_key, safe_stat
 
 
 @dataclass
@@ -23,7 +30,8 @@ class FileEntry:
     category: str
     hidden: bool
     system: bool
-    modified: float  # st_mtime (last modified time), used by --date-folders
+    modified: float  # st_mtime (last modified time)
+    created: float  # creation time (see utils.creation_time), used by --date-folders
 
 
 class Scanner:
@@ -140,4 +148,5 @@ class Scanner:
                     hidden=hidden,
                     system=system,
                     modified=st.st_mtime,
+                    created=creation_time(st),
                 )
