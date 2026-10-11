@@ -1,3 +1,6 @@
+# File Organizer - Python dependencies
+# Author: Madhu Kumar <madhu.a@hotmail.com>
+#
 # File Organizer uses only the Python 3.11+ standard library.
 # No third-party packages are required to run it.
 #

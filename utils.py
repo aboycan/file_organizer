@@ -1,7 +1,15 @@
 """Small stand-alone helpers shared by the other modules.
 
+Size parsing and formatting, Year/MonYear folder names, file creation
+time, Windows hidden/system attributes and long paths, SHA-256 hashing,
+collision-free destination names, config.json location, and drive/volume
+checks.
+
 Kept dependency-free (standard library only) so the utility can be
 packaged with PyInstaller without surprises.
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
 """
 
 from __future__ import annotations
@@ -92,6 +100,27 @@ def date_folder_parts(timestamp: float) -> tuple[str, str]:
     year = str(dt.year)
     month = f"{_MONTH_ABBR[dt.month - 1]}{dt.year}"
     return year, month
+
+
+def creation_time(st: os.stat_result) -> float:
+    """Best available *creation* (birth) time from a stat result, as a Unix timestamp.
+
+    - Windows on Python 3.12+, and macOS: ``st_birthtime``.
+    - Windows on Python 3.11: ``st_ctime``, which on Windows *is* the
+      creation time. (On macOS/Linux ``st_ctime`` means "last metadata
+      change", so it is never used there.)
+    - Linux: ``os.stat()`` does not expose a creation time, so this falls
+      back to ``st_mtime`` (last modified), the date the tool used before.
+
+    A missing or non-positive birth time (some network/FUSE filesystems
+    report 0 when they don't track it) also falls back to ``st_mtime``.
+    """
+    birth = getattr(st, "st_birthtime", None)
+    if birth is None and IS_WINDOWS:
+        birth = st.st_ctime
+    if birth is not None and birth > 0:
+        return birth
+    return st.st_mtime
 
 
 def format_duration(seconds: float) -> str:

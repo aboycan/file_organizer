@@ -1,4 +1,15 @@
-"""Orchestrates the scan -> filter -> confirm -> copy/move pipeline."""
+"""Orchestrates the scan -> filter -> confirm -> copy/move pipeline.
+
+Validates the source and destination, scans, applies the hidden / system /
+category / size filters, shows the confirmation summary, checks free
+space, then copies or moves each file (or only simulates it with
+--dry-run). Destination paths are built here, including the optional
+preserved folder structure and Year/MonYear date folders. Every file's
+outcome goes to the log, and optionally to a CSV report.
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
+"""
 
 from __future__ import annotations
 
@@ -13,6 +24,7 @@ from typing import Dict, List, Optional
 
 from categorizer import Categorizer
 from duplicate_handler import DuplicateHandler
+from file_dates import SOURCES as DATE_SOURCES, original_date
 from logger import setup_logger
 from scanner import FileEntry, Scanner
 from utils import (
@@ -78,6 +90,7 @@ class Organizer:
         self.logger = setup_logger(Path(args.log_file) if args.log_file else None)
         self.categorizer = Categorizer()
         self.duplicate_handler = DuplicateHandler(args.duplicate, hash_check=args.hash_check)
+        self.date_sources: Dict[str, int] = {}  # --date-folders: where each file's date came from
 
     # ------------------------------------------------------------------ #
     # Validation
@@ -298,7 +311,10 @@ class Organizer:
         dest_dir = self.destination / entry.category
 
         if self.args.date_folders and self.categorizer.allows_date_folders(entry.category):
-            year, month = date_folder_parts(entry.modified)
+            when, source = original_date(entry.path, entry.created, entry.modified)
+            year, month = date_folder_parts(when)
+            self.date_sources[source] = self.date_sources.get(source, 0) + 1
+            self.logger.debug("Date for '%s': %s (from %s)", entry.path, month, source)
             dest_dir = dest_dir / year / month
 
         if self.args.preserve_structure:
@@ -552,6 +568,8 @@ class Organizer:
         print(f"Files renamed    : {self.stats.renamed:,}")
         print(f"Files skipped    : {self.stats.skipped + self.stats.identical:,}")
         print(f"Errors           : {self.stats.errors:,}")
+        if self.date_sources:
+            print(f"Dates taken from : {self._date_sources_text()}")
         print(f"Duration         : {format_duration(elapsed)}")
         print(f"Log file         : {self.logger.log_file_path}")  # type: ignore[attr-defined]
         if self.args.export_csv:
@@ -580,7 +598,14 @@ class Organizer:
         self.logger.info("Files renamed: %d", self.stats.renamed)
         self.logger.info("Files skipped: %d", self.stats.skipped + self.stats.identical)
         self.logger.info("Errors: %d", self.stats.errors)
+        if self.date_sources:
+            self.logger.info("Dates taken from: %s", self._date_sources_text())
         self.logger.info("Total processing duration: %s", format_duration(elapsed))
+
+    def _date_sources_text(self) -> str:
+        return ", ".join(
+            f"{self.date_sources[s]:,} {s}" for s in DATE_SOURCES if self.date_sources.get(s)
+        )
 
     def _write_csv(self) -> None:
         if not self.args.export_csv:

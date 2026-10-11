@@ -6,6 +6,9 @@ trail (every file's outcome, always, regardless of --verbose) and the
 channel for warnings/errors that must not get lost under the progress bar.
 The console handler is intentionally always WARNING+ only, so it never
 duplicates or interleaves with the organizer's own stdout output.
+
+Part of File Organizer.
+Author: Madhu Kumar <madhu.a@hotmail.com>
 """
 
 from __future__ import annotations
