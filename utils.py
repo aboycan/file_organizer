@@ -2,12 +2,8 @@
 
 Size parsing and formatting, Year/MonYear folder names, file creation
 time, Windows hidden/system attributes and long paths, SHA-256 hashing,
-feature/find-files collision-free destination names, --extensions parsing, folder sizes for
+collision-free destination names, --extensions parsing, folder sizes for
 --find --show-size, config.json location, and drive/volume checks.
-collision-free destination names, config.json location, and drive/volume
-checks.
-Kept dependency-free (standard library only) so the utility can be
-packaged with PyInstaller without surprises.
 
 Part of File Organizer.
 Author: Madhu Kumar <madhu.a@hotmail.com>
