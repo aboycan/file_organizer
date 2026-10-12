@@ -5,7 +5,9 @@ category / size filters, shows the confirmation summary, checks free
 space, then copies or moves each file (or only simulates it with
 --dry-run). Destination paths are built here, including the optional
 preserved folder structure and Year/MonYear date folders. Every file's
-outcome goes to the log, and optionally to a CSV report.
+outcome goes to the log, and optionally to a CSV report. --find runs the
+same scan and filters but only lists the matching files (optionally with
+file and folder sizes) and changes nothing.
 
 Part of File Organizer.
 Author: Madhu Kumar <madhu.a@hotmail.com>
@@ -29,12 +31,14 @@ from logger import setup_logger
 from scanner import FileEntry, Scanner
 from utils import (
     IS_WINDOWS,
+    FolderSizer,
     date_folder_parts,
     format_duration,
     human_size,
     is_drive_root,
     is_same_volume,
     long_path,
+    parse_extensions,
     path_is_within,
     path_key,
 )
@@ -54,6 +58,7 @@ class Stats:
     identical: int = 0
     errors: int = 0
     filtered_category: int = 0
+    filtered_extension: int = 0
     filtered_size: int = 0
     ignored_hidden: int = 0
     ignored_system: int = 0
@@ -91,6 +96,9 @@ class Organizer:
         self.categorizer = Categorizer()
         self.duplicate_handler = DuplicateHandler(args.duplicate, hash_check=args.hash_check)
         self.date_sources: Dict[str, int] = {}  # --date-folders: where each file's date came from
+        self.find_mode = bool(getattr(args, "find", False))  # --find: list only, change nothing
+        self.extensions = parse_extensions(getattr(args, "extensions", None))
+        self.destination: Optional[Path] = None
 
     # ------------------------------------------------------------------ #
     # Validation
@@ -98,7 +106,6 @@ class Organizer:
     def _validate(self) -> Optional[str]:
         args = self.args
         source = Path(args.source)
-        destination = Path(args.destination)
 
         if not source.exists():
             return f"Source path does not exist: {source}"
@@ -109,6 +116,14 @@ class Organizer:
         except OSError as exc:
             return f"Source path is not accessible: {source} ({exc})"
 
+        if self.find_mode:  # nothing is written anywhere, so no destination is needed
+            try:
+                self.source = source.resolve()
+            except OSError as exc:
+                return f"Could not resolve paths: {exc}"
+            return None
+
+        destination = Path(args.destination)
         try:
             source_resolved = source.resolve()
             dest_resolved = destination.resolve()
@@ -178,7 +193,11 @@ class Organizer:
             source=self.source,
             categorizer=self.categorizer,
             logger=self.logger,
-            destination=self.destination if path_is_within(self.destination, self.source) else None,
+            destination=(
+                self.destination
+                if self.destination is not None and path_is_within(self.destination, self.source)
+                else None
+            ),
             progress_callback=progress,
             exclude_names=exclude_names,
             exclude_paths=exclude_paths,
@@ -277,6 +296,11 @@ class Organizer:
                 if args.export_csv:
                     self.csv_rows.append(self._base_row(entry, status="Filtered (Category)"))
                 continue
+            if self.extensions is not None and entry.path.suffix.lower() not in self.extensions:
+                self.stats.filtered_extension += 1
+                if args.export_csv:
+                    self.csv_rows.append(self._base_row(entry, status="Filtered (Extension)"))
+                continue
             if args.min_size is not None and entry.size < args.min_size:
                 self.stats.filtered_size += 1
                 if args.export_csv:
@@ -343,7 +367,7 @@ class Organizer:
         print()
         print(f"Files to process: {self.stats.selected:,}")
         excluded = (
-            self.stats.filtered_category + self.stats.filtered_size
+            self.stats.filtered_category + self.stats.filtered_extension + self.stats.filtered_size
             + self.stats.ignored_hidden + self.stats.ignored_system
         )
         if excluded:
@@ -354,6 +378,8 @@ class Organizer:
                 print(f"  - System       : {self.stats.ignored_system:,}")
             if self.stats.filtered_category:
                 print(f"  - Category     : {self.stats.filtered_category:,}")
+            if self.stats.filtered_extension:
+                print(f"  - Extension    : {self.stats.filtered_extension:,}")
             if self.stats.filtered_size:
                 print(f"  - Size         : {self.stats.filtered_size:,}")
         print()
@@ -607,14 +633,14 @@ class Organizer:
             f"{self.date_sources[s]:,} {s}" for s in DATE_SOURCES if self.date_sources.get(s)
         )
 
-    def _write_csv(self) -> None:
+    def _write_csv(self, fieldnames: Optional[List[str]] = None) -> None:
         if not self.args.export_csv:
             return
         csv_path = Path(self.args.export_csv)
         try:
             csv_path.parent.mkdir(parents=True, exist_ok=True)
             with open(csv_path, "w", newline="", encoding="utf-8") as fh:
-                fieldnames = [
+                fieldnames = fieldnames or [
                     "Source Path", "File Name", "Extension", "Category",
                     "File Size", "Destination Path", "Status", "Error",
                 ]
@@ -625,6 +651,93 @@ class Organizer:
         except OSError as exc:
             self.logger.error("Could not write CSV report '%s': %s", csv_path, exc)
             print(f"\nWARNING: Could not write CSV report: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Find mode (--find): list matching files, change nothing
+    # ------------------------------------------------------------------ #
+    def _run_find(self, selected: List[FileEntry]) -> None:
+        args = self.args
+        show_size = bool(getattr(args, "show_size", False))
+        selected = sorted(selected, key=lambda e: path_key(e.path))
+        criteria = []
+        if args.categories:
+            criteria.append(f"categories {args.categories}")
+        if self.extensions:
+            criteria.append("extensions " + ", ".join(sorted(self.extensions)))
+        print("\nFIND MODE - nothing will be copied, moved or deleted.")
+        print(f"Source   : {self.source}")
+        print(f"Matching : {'; '.join(criteria) if criteria else 'all files'}")
+        excluded = (
+            self.stats.filtered_category + self.stats.filtered_extension + self.stats.filtered_size
+            + self.stats.ignored_hidden + self.stats.ignored_system
+        )
+        print(f"Found    : {len(selected):,} file(s)" + (f"  ({excluded:,} other files skipped)" if excluded else ""))
+
+        folder_sizes: Dict[str, int] = {}
+        if show_size and selected:
+            print("\nMeasuring folder sizes (each folder's total, including subfolders)...")
+            sizer = FolderSizer()
+            for entry in selected:
+                key = path_key(entry.path.parent)
+                if key not in folder_sizes:
+                    folder_sizes[key] = sizer.size(entry.path.parent)
+
+        print()
+        if show_size:
+            print(f"{'File size':>12}  {'Folder size':>12}  File")
+            print(f"{'-' * 12}  {'-' * 12}  {'-' * 40}")
+        self.csv_rows = []  # the find report replaces the organizer's per-file rows
+        total_size = 0
+        for entry in selected:
+            total_size += entry.size
+            if show_size:
+                fsize = folder_sizes[path_key(entry.path.parent)]
+                print(f"{human_size(entry.size):>12}  {human_size(fsize):>12}  {entry.path}")
+                self.logger.info("Found: '%s' (%s) in folder '%s' (%s)", entry.path,
+                                 human_size(entry.size), entry.path.parent, human_size(fsize))
+            else:
+                print(str(entry.path))
+                self.logger.info("Found: '%s'", entry.path)
+            if args.export_csv:
+                row = {
+                    "Source Path": str(entry.path),
+                    "File Name": entry.path.name,
+                    "Extension": entry.path.suffix,
+                    "Category": entry.category,
+                    "File Size": entry.size,
+                    "Folder": str(entry.path.parent),
+                }
+                if show_size:
+                    row["Folder Size"] = folder_sizes[path_key(entry.path.parent)]
+                self.csv_rows.append(row)
+
+        elapsed = time.monotonic() - self.start_time
+        print("\n" + "=" * BANNER_WIDTH)
+        print("FIND SUMMARY".center(BANNER_WIDTH))
+        print("=" * BANNER_WIDTH)
+        print(f"Files scanned    : {self.stats.discovered:,}")
+        print(f"Files found      : {len(selected):,}")
+        print(f"Total size found : {human_size(total_size)}")
+        if show_size:
+            print(f"In folders       : {len(folder_sizes):,}")
+        print(f"Duration         : {format_duration(elapsed)}")
+        print(f"Log file         : {self.logger.log_file_path}")  # type: ignore[attr-defined]
+        if args.export_csv:
+            print(f"CSV report       : {args.export_csv}")
+        print("=" * BANNER_WIDTH)
+
+        self.logger.info("=" * 60)
+        self.logger.info("Find COMPLETE (nothing copied, moved or deleted)")
+        self.logger.info("Source: %s", self.source)
+        self.logger.info("Command-line arguments: %s", vars(args))
+        self.logger.info("Files scanned: %d", self.stats.discovered)
+        self.logger.info("Files found: %d (%s)", len(selected), human_size(total_size))
+        self.logger.info("Total duration: %s", format_duration(elapsed))
+        if args.export_csv:
+            fields = ["Source Path", "File Name", "Extension", "Category", "File Size", "Folder"]
+            if show_size:
+                fields.append("Folder Size")
+            self._write_csv(fields)
 
     # ------------------------------------------------------------------ #
     # Entry point
@@ -650,6 +763,15 @@ class Organizer:
         except SystemExit as exc:
             print(str(exc))
             return 1
+
+        if self.find_mode:
+            try:
+                self._run_find(selected)
+            except KeyboardInterrupt:
+                print("\n\nOperation cancelled.")
+                self.logger.warning("Find cancelled by user (Ctrl+C).")
+                return 130
+            return 0
 
         if not self._print_summary_box():
             print("\nOperation cancelled by user.")

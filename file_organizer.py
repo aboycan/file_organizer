@@ -6,6 +6,8 @@ This is the command-line entry point: it defines the options with argparse
 and hands them to organizer.Organizer, which runs the
 scan -> filter -> confirm -> copy/move pipeline. Copy is the default, so
 the original files are never deleted or modified unless --move is given.
+--find instead only lists matching files (optionally with file and folder
+sizes) and changes nothing.
 
 Run with -h/--help for the full list of options and examples.
 
@@ -30,6 +32,7 @@ def _build_epilog() -> str:
         spaced_src, spaced_dst = '"E:\\My External Drive"', '"D:\\Organized"'
         exclude_example = '"node_modules,.git,D:\\Backup\\Old"'
         csv_path = "D:\\Reports\\scan.csv"
+        exe_csv = "D:\\Reports\\exe_files.csv"
         date_example = "Images\\2025\\Jan2025"
         space_note = 'Windows paths with spaces must be quoted, e.g. "E:\\My External Drive".'
     else:
@@ -38,6 +41,7 @@ def _build_epilog() -> str:
         spaced_src, spaced_dst = '"/Volumes/My External Drive"', '"~/Organized"'
         exclude_example = '"node_modules,.git,/mnt/backup/old"'
         csv_path = "~/Reports/scan.csv"
+        exe_csv = "~/Reports/exe_files.csv"
         date_example = "Images/2025/Jan2025"
         space_note = 'Paths with spaces must be quoted, e.g. "/Volumes/My External Drive".'
 
@@ -67,6 +71,13 @@ Examples:
 
   Non-interactive run for scripting/scheduled tasks, with a CSV report:
     {py} file_organizer.py {src} {dst} --yes --export-csv {csv_path}
+
+  Find all .exe files (nothing is copied or moved; no destination needed),
+  showing each file's size and the total size of the folder it is in:
+    {py} file_organizer.py {src} --find --extensions .exe --show-size
+
+  Same, saved to a spreadsheet-friendly CSV:
+    {py} file_organizer.py {src} --find --extensions .exe --show-size --export-csv {exe_csv}
 
   Handle a path with spaces (quote it):
     {py} file_organizer.py {spaced_src} {spaced_dst}
@@ -112,7 +123,10 @@ def build_parser() -> argparse.ArgumentParser:
         help='Source drive/volume or folder to scan, e.g. D:\\ (Windows) or '
              '/Volumes/MyDrive (macOS) or /mnt/data (Linux)',
     )
-    parser.add_argument("destination", help="Destination folder to organize files into")
+    parser.add_argument(
+        "destination", nargs="?",
+        help="Destination folder to organize files into (not needed with --find)",
+    )
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--copy", action="store_true", help="Copy files to the destination (default)")
@@ -166,6 +180,22 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: all categories)",
     )
     parser.add_argument(
+        "--extensions", metavar="LIST",
+        help="Comma-separated file extensions to process, e.g. .exe or .exe,.msi "
+             "(the dot is optional; case-insensitive). Combines with --categories",
+    )
+    parser.add_argument(
+        "--find", action="store_true",
+        help="Find mode: only list the matching files (use --extensions / "
+             "--categories / size filters to choose them). Nothing is copied, "
+             "moved or created, and no destination is needed",
+    )
+    parser.add_argument(
+        "--show-size", action="store_true",
+        help="With --find: also show each file's size and the total size of the "
+             "folder containing it (including its subfolders)",
+    )
+    parser.add_argument(
         "--exclude-folders", metavar="LIST",
         help="Comma-separated folders to skip entirely (never scanned, so never "
              "copied/moved and left completely untouched). Each entry is either a "
@@ -204,6 +234,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.min_size is not None and args.max_size is not None and args.min_size > args.max_size:
         parser.error("--min-size cannot be greater than --max-size")
+    if args.show_size and not args.find:
+        parser.error("--show-size can only be used with --find")
+    if args.destination is None and not args.find:
+        parser.error("the following arguments are required: destination")
+    if args.extensions is not None and not any(e.strip(' ."') for e in args.extensions.split(",")):
+        parser.error("--extensions needs at least one extension, e.g. --extensions .exe")
+    if args.find and args.destination is not None:
+        print(f"Note: --find only lists files; the destination '{args.destination}' is ignored.")
 
     try:
         organizer = Organizer(args)
