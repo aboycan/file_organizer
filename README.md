@@ -44,6 +44,7 @@ On macOS/Linux you can also make it directly executable:
 
 ```text
 python file_organizer.py <SOURCE> <DESTINATION> [options]
+python file_organizer.py <SOURCE> --find [options]      # list only, no destination
 ```
 
 Works the same way from Command Prompt, PowerShell, macOS Terminal, or a
@@ -106,6 +107,9 @@ correctly on its own.
 | `--duplicate {skip,rename,overwrite}` | How to handle a destination file that already exists. Default: `rename`. |
 | `--hash-check` | Before applying `--duplicate`, compare SHA-256 hashes and silently skip files that are byte-for-byte identical to what's already at the destination. |
 | `--categories LIST` | Comma-separated list of categories to process, e.g. `Images,Excel,PDF`. Other files are left untouched in the source. |
+| `--extensions LIST` | Comma-separated file extensions to process, e.g. `.exe` or `.exe,.msi` (dot optional, case-insensitive). Combines with `--categories`. Other files are left untouched. |
+| `--find` | Find mode: only **list** the matching files — nothing is copied, moved or created, and no destination is needed. Use with `--extensions`, `--categories`, size and folder filters. |
+| `--show-size` | With `--find`: also show each file's size and the total size of the folder containing it (including its subfolders). |
 | `--exclude-folders LIST` | Comma-separated folders to skip entirely — never scanned, so never copied/moved. Each entry is a bare name matched at any depth (`node_modules`) or a specific path (`D:\Backup\Old`). |
 | `--min-size SIZE` | Only process files at least this size, e.g. `10MB`. |
 | `--max-size SIZE` | Only process files at most this size, e.g. `5GB`. |
@@ -144,6 +148,44 @@ duplicate handling (so renamed names like `photo_1.jpg` are accurate) — but
 it copies nothing, moves nothing, deletes nothing, and doesn't even create
 the destination folder. It combines well with `--export-csv` to get a full
 report before touching anything.
+
+## Finding files (`--find`)
+
+`--find` scans the source like a normal run but only **lists** the files
+that match your filters. Nothing is copied, moved, renamed or created, and
+no destination folder is needed. For example, to find every `.exe` on a
+drive:
+
+```bash
+python file_organizer.py D:\ --find --extensions .exe
+```
+
+Add `--show-size` to see how big each file is and how big the folder it
+sits in is (the folder's total, including all of its subfolders — handy for
+spotting large installed apps or installer piles):
+
+```bash
+python file_organizer.py D:\ --find --extensions .exe --show-size
+```
+
+```text
+   File size   Folder size  File
+------------  ------------  ----------------------------------------
+     2.86 MB       8.58 MB  D:\Apps\Tool\app.exe
+     1.91 MB       2.58 MB  D:\Downloads\setup.exe
+```
+
+- Results are sorted by path, so files from the same folder sit together.
+- All the usual filters work: `--categories Executables` (both `.exe` and
+  `.msi`), `--min-size 50MB`, `--exclude-folders "Windows,Program Files"`,
+  `--ignore-hidden`, `--ignore-system`.
+- Add `--export-csv PATH` for a spreadsheet: one row per file with
+  `Source Path, File Name, Extension, Category, File Size, Folder` (plus
+  `Folder Size` with `--show-size`); sizes are in bytes so they sort
+  correctly.
+- Measuring folder sizes reads every file under those folders, so on a
+  whole drive `--show-size` takes longer than a plain `--find`. Each folder
+  is measured only once, and symlinked/junction folders are not followed.
 
 ## Copy vs. Move
 

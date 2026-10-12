@@ -2,8 +2,8 @@
 
 Size parsing and formatting, Year/MonYear folder names, file creation
 time, Windows hidden/system attributes and long paths, SHA-256 hashing,
-collision-free destination names, config.json location, and drive/volume
-checks.
+collision-free destination names, --extensions parsing, folder sizes for
+--find --show-size, config.json location, and drive/volume checks.
 
 Kept dependency-free (standard library only) so the utility can be
 packaged with PyInstaller without surprises.
@@ -169,6 +169,82 @@ def long_path(path: str) -> str:
     if abs_path.startswith("\\\\"):
         return "\\\\?\\UNC\\" + abs_path.lstrip("\\")
     return "\\\\?\\" + abs_path
+
+
+def parse_extensions(value: Optional[str]) -> Optional[set[str]]:
+    """``"exe, .MSI"`` -> ``{".exe", ".msi"}``; None/empty -> None (no filter)."""
+    if not value:
+        return None
+    exts = set()
+    for raw in value.split(","):
+        ext = raw.strip().strip('"').lower()
+        if not ext:
+            continue
+        exts.add(ext if ext.startswith(".") else "." + ext)
+    return exts or None
+
+
+class FolderSizer:
+    """Total size of a folder, including all of its subfolders.
+
+    Results are cached per folder (and for every subfolder measured along
+    the way), so listing many files from the same tree measures each
+    folder only once. Unreadable entries are skipped rather than raising.
+    Symlinked/junction folders are not followed, so link loops can't occur.
+    """
+
+    def __init__(self):
+        self._cache: dict[str, int] = {}
+
+    @staticmethod
+    def _key(path) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
+
+    @staticmethod
+    def _is_link_dir(entry: os.DirEntry) -> bool:
+        if entry.is_symlink():
+            return True
+        is_junction = getattr(entry, "is_junction", None)  # Python 3.12+
+        if is_junction is not None:
+            return is_junction()
+        if IS_WINDOWS:  # Python 3.11 on Windows: detect junctions via the reparse-point attribute
+            attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+            return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+        return False
+
+    def size(self, folder) -> int:
+        root = self._key(folder)
+        if root in self._cache:
+            return self._cache[root]
+        pending: dict[str, tuple[int, list[str]]] = {}
+        stack: list[tuple[str, bool]] = [(str(folder), False)]
+        while stack:  # iterative post-order walk: no recursion-depth limit
+            path, children_done = stack.pop()
+            key = self._key(path)
+            if children_done:
+                own, children = pending.pop(key)
+                self._cache[key] = own + sum(self._cache.get(c, 0) for c in children)
+                continue
+            if key in self._cache or key in pending:
+                continue
+            own, children = 0, []
+            try:
+                with os.scandir(long_path(path)) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                if not self._is_link_dir(entry):
+                                    children.append(os.path.join(path, entry.name))
+                            elif entry.is_file(follow_symlinks=False):
+                                own += entry.stat(follow_symlinks=False).st_size
+                        except OSError:
+                            continue
+            except OSError:
+                pass
+            pending[key] = (own, [self._key(c) for c in children])
+            stack.append((path, True))
+            stack.extend((c, False) for c in children)
+        return self._cache[root]
 
 
 def safe_stat(path: os.PathLike) -> Optional[os.stat_result]:
