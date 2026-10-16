@@ -109,6 +109,8 @@ correctly on its own.
 | `--categories LIST` | Comma-separated list of categories to process, e.g. `Images,Excel,PDF`. Other files are left untouched in the source. |
 | `--extensions LIST` | Comma-separated file extensions to process, e.g. `.exe` or `.exe,.msi` (dot optional, case-insensitive). Combines with `--categories`. Other files are left untouched. |
 | `--find` | Find mode: only **list** the matching files — nothing is copied, moved or created, and no destination is needed. Use with `--extensions`, `--categories`, size and folder filters. |
+| `--summary` | Summary mode: report every file type (grouped by category) with its number of files and total size, largest first. Nothing is copied or moved; no destination needed. |
+| `--undo RECORD` | Undo a previous run: move its files back to where they came from (or remove the identical copies of a copy run). `RECORD` is that run's `--export-csv` file or its log file. No source/destination needed; add `--dry-run` to preview. |
 | `--show-size` | With `--find`: also show each file's size and the total size of the folder containing it (including its subfolders). |
 | `--exclude-folders LIST` | Comma-separated folders to skip entirely — never scanned, so never copied/moved. Each entry is a bare name matched at any depth (`node_modules`) or a specific path (`D:\Backup\Old`). |
 | `--min-size SIZE` | Only process files at least this size, e.g. `10MB`. |
@@ -186,6 +188,67 @@ python file_organizer.py D:\ --find --extensions .exe --show-size
 - Measuring folder sizes reads every file under those folders, so on a
   whole drive `--show-size` takes longer than a plain `--find`. Each folder
   is measured only once, and symlinked/junction folders are not followed.
+
+## Folder summary (`--summary`)
+
+To see what a folder actually contains before organizing it:
+
+```bash
+python file_organizer.py "I:\Dad" --summary
+```
+
+```text
+By category
+  Category            Files   Total size   Share
+  -------------- ---------- ------------ -------
+  Videos                528     45.20 GB   81.3%
+  Images              8,257      9.80 GB   17.6%
+  Other                  62    610.00 MB    1.1%
+
+By file type
+  Category       Type                  Files   Total size   Share
+  -------------- ---------------- ---------- ------------ -------
+  Videos         .mp4                    513     44.10 GB   79.3%
+  Videos         .mov                     12      1.10 GB    2.0%
+  Images         .jpg                  8,110      9.50 GB   17.1%
+  ...
+```
+
+Categories are sorted largest first, and file types largest first within
+each category; files without an extension show as `(no extension)`. All
+filters apply (`--categories`, `--extensions`, `--min-size`,
+`--exclude-folders`, `--ignore-hidden`, ...), and `--export-csv PATH` saves
+the per-type table (`Category, Type, Files, Total Size, Total Size
+(readable), Share %`). Like `--find`, it changes nothing and needs no
+destination.
+
+## Undoing a run (`--undo`)
+
+Ran the wrong command? Every real run can be reversed from its record —
+either the CSV it wrote with `--export-csv`, or the log file every run
+writes to `.\logs\` (so even runs without a CSV can be undone):
+
+```bash
+python file_organizer.py --undo I:\videos_moved.csv --dry-run
+python file_organizer.py --undo I:\videos_moved.csv
+python file_organizer.py --undo logs\file_organizer_20261014_215401.log
+```
+
+- **Moved files go back to their exact original path and name** (files
+  renamed `_1` during the run get their original name back); missing
+  original folders are recreated.
+- **Copied files**: the copy is removed — but only if the original is still
+  in place and the copy is byte-for-byte identical to it, so nothing unique
+  is ever deleted. A copy you edited afterwards is kept.
+- **Never overwrites**: if something already exists at an original path,
+  that file is skipped and reported.
+- **Safe to repeat**: files already back are recognised and skipped, so an
+  interrupted undo can simply be run again.
+- Folders the undo leaves **empty** in the destination are removed (only
+  empty ones). Files that *overwrote* something during the run
+  (`--duplicate overwrite`) are moved back too, but the file they replaced
+  can't be recovered — the undo tells you how many.
+- A `--dry-run` record has nothing to undo; the tool says so.
 
 ## Copy vs. Move
 
@@ -514,16 +577,65 @@ things differ because the underlying OS does:
   policy, file count) is shown before any real copy/move, unless `--yes` is
   given for unattended/scheduled use.
 
+## Folder Reorg: gather a folder from all years into one (`folder_reorg.py`)
+
+After organizing by date, one original folder (say `Rajesh HDD`) is often
+split across many Year/Month folders:
+
+```text
+I:\Organized_Final\Images\2000\Sep2000\Rajesh HDD\...
+I:\Organized_Final\Images\2012\Jan2012\TP\Rajesh HDD\...
+I:\Organized_Final\Videos\2015\May2015\Rajesh HDD\...
+```
+
+`folder_reorg.py` is a separate tool in this project that finds every folder
+with that name, at any depth, and merges their contents into **one** folder:
+
+```bash
+python folder_reorg.py I:\Organized_Final --folder "Rajesh HDD" --dry-run
+python folder_reorg.py I:\Organized_Final --folder "Rajesh HDD" --move --remove-empty
+```
+
+Everything ends up in `I:\Organized_Final\Rajesh HDD` (or wherever `--dest`
+points). How it behaves:
+
+- **Name matching** is exact but ignores upper/lower case (`rajesh hdd`
+  matches; `Rajesh HDD Old` does not). Give several names comma-separated to
+  merge them together: `--folder "Rajesh HDD,Rajesh_HDD"`.
+- **Structure inside each match is kept** (`Rajesh HDD\Trip\b.jpg` →
+  `<dest>\Trip\b.jpg`); the year/month/category/`TP` folders above it are
+  dropped. A `Rajesh HDD` nested inside another one simply stays a subfolder.
+- **Duplicates:** a file that is byte-for-byte identical to one already
+  gathered is kept only once (SHA-256 comparison). A *different* file with
+  the same name is kept too, renamed `a_1.jpg`, `a_2.jpg`, ... Change that
+  with `--duplicate skip|overwrite`, or turn off the content comparison with
+  `--no-hash-check`.
+- **Copy is the default**; `--move` moves the files instead. With `--move`,
+  identical copies that were skipped stay where they were (their content is
+  already in the destination), and `--remove-empty` removes the matched
+  folders that are left empty. Only empty folders are ever removed — never a
+  file, and never anything outside the matched folders.
+- The destination is never searched or re-gathered, so running the tool
+  twice is safe.
+- `--dry-run` shows every planned move/rename/skip without touching
+  anything; `--export-csv PATH` saves the same as a spreadsheet;
+  `--exclude-folders`, `--verbose`, `--log-file` and `--yes` work as in
+  `file_organizer.py`.
+
+Run `python folder_reorg.py --help` for all options and examples.
+
 ## Project structure
 
 ```text
 file_organizer/
 │
 ├── file_organizer.py     # CLI entry point (argparse, wiring)
+├── folder_reorg.py       # Separate tool: gather every folder with a given name into one
 ├── scanner.py             # Recursive, error-tolerant directory scanning
 ├── categorizer.py         # Extension -> category classification
 ├── organizer.py           # Orchestrates scan -> filter -> confirm -> copy/move
 ├── duplicate_handler.py   # skip / rename / overwrite resolution
+├── undo.py                # --undo: reverse a previous run from its CSV or log
 ├── file_dates.py          # Original-date detection for --date-folders (EXIF, video, file dates)
 ├── logger.py               # Logging setup
 ├── utils.py                 # Size parsing, hashing, path helpers

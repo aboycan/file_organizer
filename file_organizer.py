@@ -7,7 +7,8 @@ and hands them to organizer.Organizer, which runs the
 scan -> filter -> confirm -> copy/move pipeline. Copy is the default, so
 the original files are never deleted or modified unless --move is given.
 --find instead only lists matching files (optionally with file and folder
-sizes) and changes nothing.
+sizes), and --summary reports every file type with its count and total
+size; neither changes anything.
 
 Run with -h/--help for the full list of options and examples.
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from organizer import Organizer
 from utils import IS_WINDOWS, SizeParseError, parse_size
@@ -33,6 +35,7 @@ def _build_epilog() -> str:
         exclude_example = '"node_modules,.git,D:\\Backup\\Old"'
         csv_path = "D:\\Reports\\scan.csv"
         exe_csv = "D:\\Reports\\exe_files.csv"
+        undo_csv = "D:\\Reports\\moved.csv"
         date_example = "Images\\2025\\Jan2025"
         space_note = 'Windows paths with spaces must be quoted, e.g. "E:\\My External Drive".'
     else:
@@ -42,6 +45,7 @@ def _build_epilog() -> str:
         exclude_example = '"node_modules,.git,/mnt/backup/old"'
         csv_path = "~/Reports/scan.csv"
         exe_csv = "~/Reports/exe_files.csv"
+        undo_csv = "~/Reports/moved.csv"
         date_example = "Images/2025/Jan2025"
         space_note = 'Paths with spaces must be quoted, e.g. "/Volumes/My External Drive".'
 
@@ -78,6 +82,13 @@ Examples:
 
   Same, saved to a spreadsheet-friendly CSV:
     {py} file_organizer.py {src} --find --extensions .exe --show-size --export-csv {exe_csv}
+
+  Summarize a folder: every file type with its file count and total size:
+    {py} file_organizer.py {src_folder} --summary
+
+  Undo a previous run (moves its files back), previewing first:
+    {py} file_organizer.py --undo {undo_csv} --dry-run
+    {py} file_organizer.py --undo {undo_csv}
 
   Handle a path with spaces (quote it):
     {py} file_organizer.py {spaced_src} {spaced_dst}
@@ -119,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "source",
+        "source", nargs="?",
         help='Source drive/volume or folder to scan, e.g. D:\\ (Windows) or '
              '/Volumes/MyDrive (macOS) or /mnt/data (Linux)',
     )
@@ -191,6 +202,19 @@ def build_parser() -> argparse.ArgumentParser:
              "moved or created, and no destination is needed",
     )
     parser.add_argument(
+        "--summary", action="store_true",
+        help="Summary mode: scan the source and report each file type (grouped by "
+             "category) with its number of files and total size, largest first. "
+             "Nothing is copied, moved or created, and no destination is needed",
+    )
+    parser.add_argument(
+        "--undo", metavar="RECORD",
+        help="Undo a previous run: put its moved files back where they came from "
+             "(and remove identical copies of a copy run). RECORD is that run's "
+             "--export-csv report or its log file from .\\logs. No source or "
+             "destination needed; combine with --dry-run to preview",
+    )
+    parser.add_argument(
         "--show-size", action="store_true",
         help="With --find: also show each file's size and the total size of the "
              "folder containing it (including its subfolders)",
@@ -232,16 +256,35 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.undo:
+        if args.source or args.destination:
+            parser.error("--undo takes only the record file, e.g. --undo I:\\moved.csv "
+                         "(no source or destination)")
+        from logger import setup_logger
+        from undo import run_undo
+        logger = setup_logger(Path(args.log_file) if args.log_file else None)
+        try:
+            return run_undo(args, logger)
+        except KeyboardInterrupt:
+            print("\n\nOperation cancelled.")
+            return 130
+    if args.source is None:
+        parser.error("the following arguments are required: source, destination"
+                     if args.destination is None else "the following arguments are required: source")
+
     if args.min_size is not None and args.max_size is not None and args.min_size > args.max_size:
         parser.error("--min-size cannot be greater than --max-size")
     if args.show_size and not args.find:
         parser.error("--show-size can only be used with --find")
-    if args.destination is None and not args.find:
+    if args.find and args.summary:
+        parser.error("use either --find (list the files) or --summary (totals per file type), not both")
+    if args.destination is None and not (args.find or args.summary):
         parser.error("the following arguments are required: destination")
     if args.extensions is not None and not any(e.strip(' ."') for e in args.extensions.split(",")):
         parser.error("--extensions needs at least one extension, e.g. --extensions .exe")
-    if args.find and args.destination is not None:
-        print(f"Note: --find only lists files; the destination '{args.destination}' is ignored.")
+    if (args.find or args.summary) and args.destination is not None:
+        mode = "--find" if args.find else "--summary"
+        print(f"Note: {mode} only reports on files; the destination '{args.destination}' is ignored.")
 
     try:
         organizer = Organizer(args)
