@@ -96,7 +96,9 @@ class Organizer:
         self.categorizer = Categorizer()
         self.duplicate_handler = DuplicateHandler(args.duplicate, hash_check=args.hash_check)
         self.date_sources: Dict[str, int] = {}  # --date-folders: where each file's date came from
-        self.find_mode = bool(getattr(args, "find", False))  # --find: list only, change nothing
+        self.summary_mode = bool(getattr(args, "summary", False))  # --summary: totals per file type
+        # --find / --summary: report only, change nothing, no destination
+        self.find_mode = bool(getattr(args, "find", False)) or self.summary_mode
         self.extensions = parse_extensions(getattr(args, "extensions", None))
         self.destination: Optional[Path] = None
 
@@ -655,6 +657,70 @@ class Organizer:
     # ------------------------------------------------------------------ #
     # Find mode (--find): list matching files, change nothing
     # ------------------------------------------------------------------ #
+    def _run_summary(self, selected: List[FileEntry]) -> None:
+        """--summary: file count and total size per category and per file type."""
+        args = self.args
+        total_size = sum(e.size for e in selected)
+        by_category: Dict[str, List[int]] = {}
+        by_type: Dict[tuple, List[int]] = {}
+        for e in selected:
+            ext = e.path.suffix.lower() or "(no extension)"
+            for bucket, key in ((by_category, e.category), (by_type, (e.category, ext))):
+                counts = bucket.setdefault(key, [0, 0])
+                counts[0] += 1
+                counts[1] += e.size
+
+        def pct(size: int) -> str:
+            return f"{size / total_size * 100:5.1f}%" if total_size else "    -"
+
+        print("\nSUMMARY MODE - nothing will be copied, moved or deleted.")
+        print(f"Source : {self.source}")
+        excluded = (
+            self.stats.filtered_category + self.stats.filtered_extension + self.stats.filtered_size
+            + self.stats.ignored_hidden + self.stats.ignored_system
+        )
+        print(f"Files  : {len(selected):,}  ({human_size(total_size)})"
+              + (f"  - {excluded:,} other files skipped by filters" if excluded else ""))
+
+        cats = sorted(by_category.items(), key=lambda kv: (-kv[1][1], kv[0]))
+        print("\nBy category")
+        print(f"  {'Category':<14} {'Files':>10} {'Total size':>12} {'Share':>7}")
+        print(f"  {'-' * 14} {'-' * 10} {'-' * 12} {'-' * 7}")
+        for cat, (n, size) in cats:
+            print(f"  {cat:<14} {n:>10,} {human_size(size):>12} {pct(size):>7}")
+
+        print("\nBy file type")
+        print(f"  {'Category':<14} {'Type':<16} {'Files':>10} {'Total size':>12} {'Share':>7}")
+        print(f"  {'-' * 14} {'-' * 16} {'-' * 10} {'-' * 12} {'-' * 7}")
+        rank = {cat: i for i, (cat, _) in enumerate(cats)}
+        types = sorted(by_type.items(), key=lambda kv: (rank[kv[0][0]], -kv[1][1], kv[0][1]))
+        for (cat, ext), (n, size) in types:
+            print(f"  {cat:<14} {ext:<16} {n:>10,} {human_size(size):>12} {pct(size):>7}")
+
+        elapsed = time.monotonic() - self.start_time
+        print("\n" + "=" * BANNER_WIDTH)
+        print(f"Files scanned    : {self.stats.discovered:,}")
+        print(f"Files summarized : {len(selected):,} in {len(by_type):,} file type(s)")
+        print(f"Total size       : {human_size(total_size)}")
+        print(f"Duration         : {format_duration(elapsed)}")
+        print(f"Log file         : {self.logger.log_file_path}")  # type: ignore[attr-defined]
+        if args.export_csv:
+            print(f"CSV report       : {args.export_csv}")
+        print("=" * BANNER_WIDTH)
+
+        self.logger.info("Summary of '%s': %d files, %s", self.source, len(selected), human_size(total_size))
+        for (cat, ext), (n, size) in types:
+            self.logger.info("Type %s %s: %d files, %s", cat, ext, n, human_size(size))
+        self.logger.info("Command-line arguments: %s", vars(args))
+        if args.export_csv:
+            self.csv_rows = [
+                {"Category": cat, "Type": ext, "Files": n, "Total Size": size,
+                 "Total Size (readable)": human_size(size),
+                 "Share %": round(size / total_size * 100, 2) if total_size else 0}
+                for (cat, ext), (n, size) in types
+            ]
+            self._write_csv(["Category", "Type", "Files", "Total Size", "Total Size (readable)", "Share %"])
+
     def _run_find(self, selected: List[FileEntry]) -> None:
         args = self.args
         show_size = bool(getattr(args, "show_size", False))
@@ -766,7 +832,10 @@ class Organizer:
 
         if self.find_mode:
             try:
-                self._run_find(selected)
+                if self.summary_mode:
+                    self._run_summary(selected)
+                else:
+                    self._run_find(selected)
             except KeyboardInterrupt:
                 print("\n\nOperation cancelled.")
                 self.logger.warning("Find cancelled by user (Ctrl+C).")
